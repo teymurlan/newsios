@@ -1,6 +1,7 @@
 import os
 import sys
 import html
+import re
 import asyncio
 import logging
 import random
@@ -14,7 +15,6 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramAPIError
 from google import genai
-
 
 # ==========================================
 # 1. ИНИЦИАЛИЗАЦИЯ И ПРОВЕРКА ОКРУЖЕНИЯ
@@ -47,12 +47,10 @@ logging.info("BOT_TOKEN найден: %s", bool(BOT_TOKEN))
 logging.info("GEMINI_API_KEY найден: %s", bool(GEMINI_API_KEY))
 logging.info("CHANNEL_ID найден: %s", bool(CHANNEL_ID))
 
-
 # ==========================================
 # 2. GEMINI CLIENT
 # ==========================================
 client = genai.Client(api_key=GEMINI_API_KEY)
-
 
 # ==========================================
 # 3. TELEGRAM BOT
@@ -67,7 +65,6 @@ dp.include_router(router)
 
 # Последний сгенерированный пост для каждого пользователя
 user_last_post: dict[int, str] = {}
-
 
 # ==========================================
 # 4. UI / КЛАВИАТУРА
@@ -84,26 +81,30 @@ def get_main_keyboard() -> ReplyKeyboardMarkup:
         resize_keyboard=True
     )
 
-
 # ==========================================
 # 5. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ==========================================
 def sanitize_html_for_telegram(text: str) -> str:
     """
-    Безопасная очистка текста:
-    - убираем тройные бэктики
-    - если модель вернула мусорный HTML, экранируем опасные части
+    Безопасная очистка текста и конвертация Markdown в HTML.
     """
     if not text:
         return ""
 
-    text = text.replace("```html", "").replace("```", "").strip()
+    # 1. Превращаем блоки кода ``` в <code>
+    text = re.sub(r"```(?:html)?\n?(.*?)\n?```", r"<code>\1</code>", text, flags=re.DOTALL)
+    
+    # 2. Конвертируем маркдаун **жирный** в <b>жирный</b> (Gemini часто его использует)
+    text = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", text)
+    
+    # 3. Убираем маркдаун заголовки (###)
+    text = re.sub(r"^#+\s*", "", text, flags=re.MULTILINE)
 
     # Разрешаем только безопасные телеграм-теги
-    allowed_tags = ["b", "i", "code"]
+    allowed_tags = ["b", "strong", "i", "em", "code", "u", "s", "pre"]
 
     # Экранируем всё, потом возвращаем разрешённые теги
-    escaped = html.escape(text)
+    escaped = html.escape(text.strip())
 
     for tag in allowed_tags:
         escaped = escaped.replace(f"&lt;{tag}&gt;", f"<{tag}>")
@@ -111,33 +112,28 @@ def sanitize_html_for_telegram(text: str) -> str:
 
     return escaped
 
-
 async def generate_with_gemini(prompt: str) -> str:
     """
-    Генерация текста через новый Google Gen AI SDK.
+    Генерация текста через новый Google Gen AI SDK (нативный Async).
     """
     try:
-        response = await asyncio.to_thread(
-            client.models.generate_content,
+        # Используем client.aio для асинхронных запросов
+        response = await client.aio.models.generate_content(
             model="gemini-2.0-flash",
             contents=prompt
         )
 
-        text = getattr(response, "text", None)
+        text = response.text
         if not text:
             logging.error("Gemini вернул пустой ответ.")
             return "❌ Gemini вернул пустой ответ. Попробуйте позже."
 
-        safe_text = sanitize_html_for_telegram(text.strip())
-        if not safe_text:
-            return "❌ Не удалось обработать ответ модели."
-
+        safe_text = sanitize_html_for_telegram(text)
         return safe_text
 
     except Exception as e:
         logging.error("Ошибка генерации Gemini: %s", e)
         return "❌ Произошла ошибка при генерации контента. Попробуйте позже."
-
 
 async def generate_tech_content(topic: str, is_news: bool = False, is_idea: bool = False) -> str:
     """
@@ -197,14 +193,23 @@ async def generate_tech_content(topic: str, is_news: bool = False, is_idea: bool
 10. В конце 2-4 хэштега
 
 Формат:
-- только HTML, совместимый с Telegram
-- разрешены теги: <b>, <i>, <code>
-- не используй markdown
-- не используй ``` 
+- ТОЛЬКО HTML, совместимый с Telegram
+- Разрешены теги: <b>, <i>, <code>
+- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать Markdown (никаких **, __, #)
 """
-
     return await generate_with_gemini(prompt)
 
+async def safe_send(message: Message, text: str, reply_markup=None):
+    """Отправляет сообщение, защищая от падения бота из-за кривого HTML от нейросети"""
+    try:
+        await message.answer(text, reply_markup=reply_markup)
+    except TelegramAPIError as e:
+        if "parse" in str(e).lower() or "entities" in str(e).lower():
+            logging.warning("Gemini выдал кривой HTML. Отправляю как обычный текст.")
+            await message.answer(text, reply_markup=reply_markup, parse_mode=None)
+        else:
+            logging.error(f"Ошибка отправки сообщения: {e}")
+            await message.answer("❌ Ошибка при отправке сообщения.")
 
 # ==========================================
 # 6. ХЭНДЛЕРЫ БОТА
@@ -220,8 +225,7 @@ async def cmd_start(message: Message) -> None:
         "• публиковать посты в канал\n\n"
         "Выбирай нужную кнопку ниже."
     )
-    await message.answer(welcome_text, reply_markup=get_main_keyboard())
-
+    await safe_send(message, welcome_text, get_main_keyboard())
 
 @router.message(Command("help"))
 @router.message(F.text == "❓ Помощь")
@@ -237,16 +241,14 @@ async def cmd_help(message: Message) -> None:
         "<code>/idea</code> — идеи для постов\n"
         "<code>/publish</code> — опубликовать последний пост"
     )
-    await message.answer(help_text, reply_markup=get_main_keyboard())
-
+    await safe_send(message, help_text, get_main_keyboard())
 
 @router.message(F.text == "🎯 Идея для поста")
 @router.message(Command("idea"))
 async def cmd_idea(message: Message) -> None:
     await message.answer("⏳ <i>Генерирую идеи...</i>")
     ideas = await generate_tech_content("Идеи для постов", is_idea=True)
-    await message.answer(ideas, reply_markup=get_main_keyboard())
-
+    await safe_send(message, ideas, get_main_keyboard())
 
 @router.message(F.text == "🚀 Опубликовать в канал")
 @router.message(Command("publish"))
@@ -261,12 +263,17 @@ async def cmd_publish(message: Message) -> None:
         await message.answer("✅ <b>Пост опубликован в канал.</b>", reply_markup=get_main_keyboard())
         user_last_post.pop(message.from_user.id, None)
     except TelegramAPIError as e:
-        logging.error("Ошибка публикации в канал: %s", e)
-        await message.answer(
-            "❌ <b>Ошибка публикации.</b>\n"
-            "Проверьте, что бот добавлен в канал как администратор."
-        )
-
+        if "parse" in str(e).lower() or "entities" in str(e).lower():
+            # Если в канал не лезет из-за HTML, шлем без форматирования
+            await bot.send_message(chat_id=CHANNEL_ID, text=post_text, parse_mode=None)
+            await message.answer("✅ <b>Пост опубликован (без форматирования, т.к. были ошибки в тегах).</b>", reply_markup=get_main_keyboard())
+            user_last_post.pop(message.from_user.id, None)
+        else:
+            logging.error("Ошибка публикации в канал: %s", e)
+            await message.answer(
+                "❌ <b>Ошибка публикации.</b>\n"
+                "Проверьте, что бот добавлен в канал как администратор и CHANNEL_ID верный."
+            )
 
 @router.message(
     F.text.in_({
@@ -298,8 +305,7 @@ async def handle_topic_buttons(message: Message) -> None:
     if not generated_text.startswith("❌"):
         user_last_post[message.from_user.id] = generated_text
 
-    await message.answer(generated_text, reply_markup=get_main_keyboard())
-
+    await safe_send(message, generated_text, get_main_keyboard())
 
 @router.message(Command("post"))
 async def cmd_post(message: Message) -> None:
@@ -307,8 +313,7 @@ async def cmd_post(message: Message) -> None:
     text = await generate_tech_content("Интересный технологический пост", is_news=False)
     if not text.startswith("❌"):
         user_last_post[message.from_user.id] = text
-    await message.answer(text, reply_markup=get_main_keyboard())
-
+    await safe_send(message, text, get_main_keyboard())
 
 @router.message(Command("autonews"))
 async def cmd_autonews(message: Message) -> None:
@@ -316,8 +321,7 @@ async def cmd_autonews(message: Message) -> None:
     text = await generate_tech_content("Свежая новость из мира IT, Android, iPhone или AI", is_news=True)
     if not text.startswith("❌"):
         user_last_post[message.from_user.id] = text
-    await message.answer(text, reply_markup=get_main_keyboard())
-
+    await safe_send(message, text, get_main_keyboard())
 
 # ==========================================
 # 7. АВТОПОСТИНГ
@@ -346,7 +350,14 @@ async def auto_post_worker() -> None:
                 logging.error("Автопостинг: генерация не удалась.")
                 continue
 
-            await bot.send_message(chat_id=CHANNEL_ID, text=post_text)
+            try:
+                await bot.send_message(chat_id=CHANNEL_ID, text=post_text)
+            except TelegramAPIError as e:
+                if "parse" in str(e).lower() or "entities" in str(e).lower():
+                    await bot.send_message(chat_id=CHANNEL_ID, text=post_text, parse_mode=None)
+                else:
+                    raise e
+
             logging.info(
                 "Автопостинг: пост отправлен в канал %s в %s",
                 CHANNEL_ID,
@@ -355,7 +366,6 @@ async def auto_post_worker() -> None:
 
         except Exception as e:
             logging.error("Автопостинг ошибка: %s", e)
-
 
 # ==========================================
 # 8. ЗАПУСК
@@ -373,7 +383,6 @@ async def main() -> None:
         await dp.start_polling(bot)
     finally:
         await bot.session.close()
-
 
 if __name__ == "__main__":
     try:
