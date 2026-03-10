@@ -54,24 +54,42 @@ dp.include_router(router)
 
 user_last_post: dict[int, dict] = {}
 
-# База крутых картинок про технологии (на случай блокировки генерации от Google)
-TECH_IMAGES = [
-    "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?q=80&w=800&auto=format&fit=crop",
-    "https://images.unsplash.com/photo-1498049794561-7780e7231661?q=80&w=800&auto=format&fit=crop",
-    "https://images.unsplash.com/photo-1525547719571-a2d4ac8945e2?q=80&w=800&auto=format&fit=crop",
-    "https://images.unsplash.com/photo-1551288049-bebda4e38f71?q=80&w=800&auto=format&fit=crop",
-    "https://images.unsplash.com/photo-1519389950473-47ba0277781c?q=80&w=800&auto=format&fit=crop",
-    "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?q=80&w=800&auto=format&fit=crop",
-    "https://images.unsplash.com/photo-1504610926078-a1611febcad3?q=80&w=800&auto=format&fit=crop",
-    "https://images.unsplash.com/photo-1593640408182-31c70c8268f5?q=80&w=800&auto=format&fit=crop",
-    "https://images.unsplash.com/photo-1601972599720-36938d4ecd31?q=80&w=800&auto=format&fit=crop",
-    "https://images.unsplash.com/photo-1526406915894-7bcd65f60845?q=80&w=800&auto=format&fit=crop",
-    "https://images.unsplash.com/photo-1611162617474-5b21e879e113?q=80&w=800&auto=format&fit=crop",
-    "https://images.unsplash.com/photo-1531297183-14a232b69226?q=80&w=800&auto=format&fit=crop"
-]
+# ==========================================
+# 4. ТЕМАТИЧЕСКАЯ ГАЛЕРЕЯ КАРТИНОК
+# ==========================================
+IMAGE_GALLERIES = {
+    "apple": [
+        "https://images.unsplash.com/photo-1512054502232-10a0a035d672?q=80&w=800&auto=format&fit=crop",
+        "https://images.unsplash.com/photo-1556656793-08538906a9f8?q=80&w=800&auto=format&fit=crop",
+        "https://images.unsplash.com/photo-1611406208690-d592664d0be7?q=80&w=800&auto=format&fit=crop",
+        "https://images.unsplash.com/photo-1531222256558-1bfb2ce3ada8?q=80&w=800&auto=format&fit=crop"
+    ],
+    "android": [
+        "https://images.unsplash.com/photo-1607252656733-fd7407043173?q=80&w=800&auto=format&fit=crop",
+        "https://images.unsplash.com/photo-1598327105666-5b89351aff97?q=80&w=800&auto=format&fit=crop",
+        "https://images.unsplash.com/photo-1625047509168-a7026f36de04?q=80&w=800&auto=format&fit=crop",
+        "https://images.unsplash.com/photo-1585060544812-6b45742d762f?q=80&w=800&auto=format&fit=crop"
+    ],
+    "vs": [
+        "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?q=80&w=800&auto=format&fit=crop",
+        "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?q=80&w=800&auto=format&fit=crop",
+        "https://images.unsplash.com/photo-1526406915894-7bcd65f60845?q=80&w=800&auto=format&fit=crop"
+    ],
+    "apps": [
+        "https://images.unsplash.com/photo-1611162617474-5b21e879e113?q=80&w=800&auto=format&fit=crop",
+        "https://images.unsplash.com/photo-1551288049-bebda4e38f71?q=80&w=800&auto=format&fit=crop",
+        "https://images.unsplash.com/photo-1607252656733-fd7407043173?q=80&w=800&auto=format&fit=crop"
+    ],
+    "tech": [
+        "https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=800&auto=format&fit=crop",
+        "https://images.unsplash.com/photo-1504610926078-a1611febcad3?q=80&w=800&auto=format&fit=crop",
+        "https://images.unsplash.com/photo-1498049794561-7780e7231661?q=80&w=800&auto=format&fit=crop",
+        "https://images.unsplash.com/photo-1531297183-14a232b69226?q=80&w=800&auto=format&fit=crop"
+    ]
+}
 
 # ==========================================
-# 4. UI / КЛАВИАТУРА
+# 5. UI / КЛАВИАТУРА
 # ==========================================
 def get_main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
@@ -86,7 +104,7 @@ def get_main_keyboard() -> ReplyKeyboardMarkup:
     )
 
 # ==========================================
-# 5. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# 6. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ==========================================
 def sanitize_html_for_telegram(text: str) -> str:
     if not text:
@@ -101,8 +119,8 @@ def sanitize_html_for_telegram(text: str) -> str:
         escaped = escaped.replace(f"&lt;/{tag}&gt;", f"</{tag}>")
     return escaped
 
-async def generate_image_with_gemini(topic: str) -> bytes | None:
-    """Генерация картинки с надежным запасным вариантом."""
+async def generate_image_with_gemini(topic: str, category: str = "tech") -> bytes | None:
+    """Генерация картинки с надежным запасным вариантом по категориям."""
     prompt = f"A modern cinematic illustration for a tech blog about: {topic}. Minimalistic, gadgets, digital art style. No text."
     
     try:
@@ -118,10 +136,11 @@ async def generate_image_with_gemini(topic: str) -> bytes | None:
     except Exception as e:
         logging.warning("Google заблокировал генерацию картинок: %s", e)
             
-    # Запасная картинка из нашей крутой базы
-    logging.info("Берем красивую tech-картинку из базы...")
+    # Запасная картинка из нашей крутой ТЕМАТИЧЕСКОЙ базы
+    logging.info(f"Берем красивую картинку из категории '{category}'...")
     try:
-        url = random.choice(TECH_IMAGES)
+        gallery = IMAGE_GALLERIES.get(category, IMAGE_GALLERIES["tech"])
+        url = random.choice(gallery)
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         response = await asyncio.to_thread(urllib.request.urlopen, req, timeout=5)
         return response.read()
@@ -132,7 +151,6 @@ async def generate_image_with_gemini(topic: str) -> bytes | None:
 
 async def generate_with_gemini(prompt: str) -> str:
     try:
-        # Используем 2.5-flash с огромными лимитами
         response = await asyncio.to_thread(
             client.models.generate_content,
             model="gemini-2.5-flash",
@@ -145,7 +163,6 @@ async def generate_with_gemini(prompt: str) -> str:
     except Exception as e:
         logging.error("Ошибка генерации текста 2.5-flash: %s", e)
         try:
-            # Запасная модель, если первая упала
             response = await asyncio.to_thread(
                 client.models.generate_content,
                 model="gemini-2.0-flash",
@@ -165,7 +182,6 @@ async def generate_tech_content(topic: str, is_news: bool = False, is_idea: bool
         )
         return await generate_with_gemini(prompt)
 
-    # КОРОТКИЕ ПОСТЫ
     length_req = "300-400 символов" if is_news else "400-600 символов"
     news_req = "Это новостной пост. Пиши строго по делу, без воды." if is_news else "Это качественный авторский tech-пост."
 
@@ -189,7 +205,8 @@ async def generate_tech_content(topic: str, is_news: bool = False, is_idea: bool
 1. Короткий цепляющий заголовок в теге <b>
 2. 1-2 коротких абзаца с самой сутью (без долгих вступлений)
 3. Короткий вывод
-4. Хэштеги: 3-4 штуки в самом конце. 2-3 на русском, 1 на английском (например: #технологии #смартфоны #Apple).
+4. ФИШКА КАНАЛА: В самом конце текста, перед хэштегами, добавь блок "🤖 <b>Мнение ИИ:</b>". Напиши там 1 короткое, дерзкое, саркастичное или футуристичное предложение от лица искусственного интеллекта по теме поста. И с новой строки добавь "🔥 <b>Уровень хайпа:</b> [оцени от 1 до 10]/10".
+5. Хэштеги: 3-4 штуки в самом конце. 2-3 на русском, 1 на английском (например: #технологии #смартфоны #Apple).
 
 Формат:
 - ТОЛЬКО HTML, совместимый с Telegram (<b>, <i>, <code>)
@@ -241,7 +258,7 @@ async def safe_send_post(target, text: str, photo_bytes: bytes | None, reply_mar
                 await target.answer("❌ Ошибка при отправке сообщения.")
 
 # ==========================================
-# 6. ХЭНДЛЕРЫ БОТА
+# 7. ХЭНДЛЕРЫ БОТА
 # ==========================================
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
@@ -249,7 +266,7 @@ async def cmd_start(message: Message) -> None:
         "👋 <b>Привет! Я AI-контент-менеджер для tech-канала.</b>\n\n"
         "Я умею:\n"
         "• генерировать короткие посты с крутыми картинками 🖼\n"
-        "• делать авто-новости\n"
+        "• делать авто-новости с фирменной фишкой канала\n"
         "• предлагать идеи контента\n"
         "• публиковать посты в канал\n\n"
         "Выбирай нужную кнопку ниже."
@@ -262,7 +279,7 @@ async def cmd_help(message: Message) -> None:
     help_text = (
         "🤖 <b>Как пользоваться ботом:</b>\n\n"
         "1. Нажми кнопку рубрики\n"
-        "2. Получи готовый пост с картинкой\n"
+        "2. Получи готовый пост с картинкой и мнением ИИ\n"
         "3. Нажми <b>🚀 Опубликовать в канал</b>\n\n"
         "Команды:\n"
         "<code>/post</code> — обычный пост\n"
@@ -310,22 +327,23 @@ async def cmd_publish(message: Message) -> None:
     })
 )
 async def handle_topic_buttons(message: Message) -> None:
+    # Маппинг: Текст кнопки -> (Промпт, Это новость?, Категория картинки)
     topic_map = {
-        "📰 Сгенерировать пост": ("Интересный пост о технологиях, гаджетах, приложениях или трендах", False),
-        "⚡ Авто-новость": ("Свежая новость из мира Android, iPhone, iOS, гаджетов или AI", True),
-        "📱 Android": ("Интересная функция Android, новое обновление, смартфон или полезный совет", False),
-        "🍏 iPhone": ("Фишка iPhone, iOS, полезная настройка Apple или совет для пользователей", False),
-        "⚔️ Android vs iPhone": ("Честное сравнение Android и iPhone по одной важной функции или сценарию", False),
-        "💡 Фишка дня": ("Короткий полезный wow-совет для смартфона или гаджета", True),
-        "📲 Полезные приложения": ("Полезное приложение для смартфона и объяснение, зачем оно нужно", False),
+        "📰 Сгенерировать пост": ("Интересный пост о технологиях, гаджетах, приложениях или трендах", False, "tech"),
+        "⚡ Авто-новость": ("Свежая новость из мира Android, iPhone, iOS, гаджетов или AI", True, "tech"),
+        "📱 Android": ("Интересная функция Android, новое обновление, смартфон или полезный совет", False, "android"),
+        "🍏 iPhone": ("Фишка iPhone, iOS, полезная настройка Apple или совет для пользователей", False, "apple"),
+        "⚔️ Android vs iPhone": ("Честное сравнение Android и iPhone по одной важной функции или сценарию", False, "vs"),
+        "💡 Фишка дня": ("Короткий полезный wow-совет для смартфона или гаджета", True, "tech"),
+        "📲 Полезные приложения": ("Полезное приложение для смартфона и объяснение, зачем оно нужно", False, "apps"),
     }
 
-    topic_prompt, is_news = topic_map.get(message.text, ("Технологии", False))
+    topic_prompt, is_news, category = topic_map.get(message.text, ("Технологии", False, "tech"))
 
-    await message.answer("⏳ <i>Пишу короткий текст и готовлю картинку... (около 10-15 сек)</i>")
+    await message.answer("⏳ <i>Пишу текст и подбираю картинку... (около 10 сек)</i>")
     
     text_task = generate_tech_content(topic_prompt, is_news=is_news)
-    image_task = generate_image_with_gemini(topic_prompt)
+    image_task = generate_image_with_gemini(topic_prompt, category=category)
     
     generated_text, image_bytes = await asyncio.gather(text_task, image_task)
 
@@ -339,9 +357,9 @@ async def handle_topic_buttons(message: Message) -> None:
 
 @router.message(Command("post"))
 async def cmd_post(message: Message) -> None:
-    await message.answer("⏳ <i>Пишу текст и готовлю картинку...</i>")
+    await message.answer("⏳ <i>Пишу текст и подбираю картинку...</i>")
     text_task = generate_tech_content("Интересный технологический пост", is_news=False)
-    image_task = generate_image_with_gemini("Интересный технологический пост")
+    image_task = generate_image_with_gemini("Интересный технологический пост", category="tech")
     
     text, photo = await asyncio.gather(text_task, image_task)
     
@@ -351,9 +369,9 @@ async def cmd_post(message: Message) -> None:
 
 @router.message(Command("autonews"))
 async def cmd_autonews(message: Message) -> None:
-    await message.answer("⏳ <i>Пишу новость и готовлю картинку...</i>")
+    await message.answer("⏳ <i>Пишу новость и подбираю картинку...</i>")
     text_task = generate_tech_content("Свежая новость из мира IT, Android, iPhone или AI", is_news=True)
-    image_task = generate_image_with_gemini("Свежая новость из мира IT, Android, iPhone или AI")
+    image_task = generate_image_with_gemini("Свежая новость из мира IT, Android, iPhone или AI", category="tech")
     
     text, photo = await asyncio.gather(text_task, image_task)
     
@@ -362,16 +380,17 @@ async def cmd_autonews(message: Message) -> None:
     await safe_send_post(message, text, photo, get_main_keyboard())
 
 # ==========================================
-# 7. АВТОПОСТИНГ
+# 8. АВТОПОСТИНГ
 # ==========================================
 async def auto_post_worker() -> None:
+    # (Тема, Это новость?, Категория картинки)
     topics = [
-        ("Свежая новость из мира IT", True),
-        ("Интересная функция Android", False),
-        ("Скрытая фишка iPhone или iOS", False),
-        ("Сравнение Android и iPhone", False),
-        ("Полезное приложение для смартфона", False),
-        ("Короткий wow-совет по гаджетам", True),
+        ("Свежая новость из мира IT", True, "tech"),
+        ("Интересная функция Android", False, "android"),
+        ("Скрытая фишка iPhone или iOS", False, "apple"),
+        ("Сравнение Android и iPhone", False, "vs"),
+        ("Полезное приложение для смартфона", False, "apps"),
+        ("Короткий wow-совет по гаджетам", True, "tech"),
     ]
 
     logging.info("Автопостинг запущен. Интервал: %s минут.", AUTO_POST_INTERVAL_MINUTES)
@@ -380,11 +399,11 @@ async def auto_post_worker() -> None:
         try:
             await asyncio.sleep(AUTO_POST_INTERVAL_MINUTES * 60)
 
-            topic, is_news = random.choice(topics)
-            logging.info("Автопостинг: генерирую пост на тему '%s'", topic)
+            topic, is_news, category = random.choice(topics)
+            logging.info("Автопостинг: генерирую пост на тему '%s' (категория: %s)", topic, category)
 
             text_task = generate_tech_content(topic, is_news=is_news)
-            image_task = generate_image_with_gemini(topic)
+            image_task = generate_image_with_gemini(topic, category=category)
             
             post_text, image_bytes = await asyncio.gather(text_task, image_task)
 
@@ -399,7 +418,7 @@ async def auto_post_worker() -> None:
             logging.error("Автопостинг ошибка: %s", e)
 
 # ==========================================
-# 8. ЗАПУСК
+# 9. ЗАПУСК
 # ==========================================
 async def main() -> None:
     logging.info("Запуск бота...")
