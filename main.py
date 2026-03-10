@@ -37,9 +37,16 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-genai.configure(api_key=GEMINI_API_KEY)
-# Используем актуальную и быструю модель
-model = genai.GenerativeModel('gemini-1.5-flash-8b')
+from google import genai
+
+client = genai.Client(api_key=GEMINI_API_KEY)
+
+def generate_text(prompt: str) -> str:
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=prompt
+    )
+    return response.text
 
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
