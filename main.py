@@ -28,7 +28,6 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 
-# Интервал автопостинга в минутах
 try:
     AUTO_POST_INTERVAL_MINUTES = int(os.getenv("AUTO_POST_INTERVAL_MINUTES", "180"))
 except ValueError:
@@ -53,8 +52,23 @@ dp = Dispatcher()
 router = Router()
 dp.include_router(router)
 
-# Храним сгенерированный текст и байты картинки для каждого пользователя
 user_last_post: dict[int, dict] = {}
+
+# База крутых картинок про технологии (на случай блокировки генерации от Google)
+TECH_IMAGES = [
+    "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?q=80&w=800&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1498049794561-7780e7231661?q=80&w=800&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1525547719571-a2d4ac8945e2?q=80&w=800&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1551288049-bebda4e38f71?q=80&w=800&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1519389950473-47ba0277781c?q=80&w=800&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?q=80&w=800&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1504610926078-a1611febcad3?q=80&w=800&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1593640408182-31c70c8268f5?q=80&w=800&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1601972599720-36938d4ecd31?q=80&w=800&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1526406915894-7bcd65f60845?q=80&w=800&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1611162617474-5b21e879e113?q=80&w=800&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1531297183-14a232b69226?q=80&w=800&auto=format&fit=crop"
+]
 
 # ==========================================
 # 4. UI / КЛАВИАТУРА
@@ -88,10 +102,9 @@ def sanitize_html_for_telegram(text: str) -> str:
     return escaped
 
 async def generate_image_with_gemini(topic: str) -> bytes | None:
-    """Генерация картинки с тройной защитой от сбоев."""
+    """Генерация картинки с надежным запасным вариантом."""
     prompt = f"A modern cinematic illustration for a tech blog about: {topic}. Minimalistic, gadgets, digital art style. No text."
     
-    # Попытка 1: gemini-2.5-flash-image
     try:
         response = await asyncio.to_thread(
             client.models.generate_content,
@@ -102,30 +115,13 @@ async def generate_image_with_gemini(topic: str) -> bytes | None:
             if part.inline_data:
                 data = part.inline_data.data
                 return base64.b64decode(data) if isinstance(data, str) else data
-    except Exception as e1:
-        logging.warning("gemini-2.5-flash-image не сработал: %s", e1)
-        
-        # Попытка 2: imagen-3.0-generate-001
-        try:
-            response = await asyncio.to_thread(
-                client.models.generate_images,
-                model='imagen-3.0-generate-001',
-                prompt=prompt,
-                config=types.GenerateImagesConfig(
-                    number_of_images=1,
-                    output_mime_type="image/jpeg"
-                )
-            )
-            if response.generated_images:
-                return response.generated_images[0].image.image_bytes
-        except Exception as e2:
-            logging.error("imagen-3.0-generate-001 тоже не сработал: %s", e2)
+    except Exception as e:
+        logging.warning("Google заблокировал генерацию картинок: %s", e)
             
-    # Попытка 3: Запасная картинка из интернета (если Google заблокировал генерацию)
-    logging.info("Используем запасную картинку из фотостока...")
+    # Запасная картинка из нашей крутой базы
+    logging.info("Берем красивую tech-картинку из базы...")
     try:
-        seed = random.randint(1, 1000)
-        url = f"https://picsum.photos/seed/{seed}/800/450"
+        url = random.choice(TECH_IMAGES)
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         response = await asyncio.to_thread(urllib.request.urlopen, req, timeout=5)
         return response.read()
@@ -136,18 +132,29 @@ async def generate_image_with_gemini(topic: str) -> bytes | None:
 
 async def generate_with_gemini(prompt: str) -> str:
     try:
+        # Используем 2.5-flash с огромными лимитами
         response = await asyncio.to_thread(
             client.models.generate_content,
-            model="gemini-3-flash-preview",
+            model="gemini-2.5-flash",
             contents=prompt
         )
         text = response.text
         if not text:
-            return "❌ Gemini вернул пустой ответ. Попробуйте позже."
+            return "❌ Gemini вернул пустой ответ."
         return sanitize_html_for_telegram(text)
     except Exception as e:
-        logging.error("Ошибка генерации текста: %s", e)
-        return "❌ Произошла ошибка при генерации контента. Попробуйте позже."
+        logging.error("Ошибка генерации текста 2.5-flash: %s", e)
+        try:
+            # Запасная модель, если первая упала
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model="gemini-2.0-flash",
+                contents=prompt
+            )
+            return sanitize_html_for_telegram(response.text)
+        except Exception as e2:
+            logging.error("Запасная генерация текста тоже упала: %s", e2)
+            return "❌ Произошла ошибка при генерации контента. Лимиты Google исчерпаны."
 
 async def generate_tech_content(topic: str, is_news: bool = False, is_idea: bool = False) -> str:
     if is_idea:
@@ -158,7 +165,7 @@ async def generate_tech_content(topic: str, is_news: bool = False, is_idea: bool
         )
         return await generate_with_gemini(prompt)
 
-    # Делаем посты КОРОТКИМИ
+    # КОРОТКИЕ ПОСТЫ
     length_req = "300-400 символов" if is_news else "400-600 символов"
     news_req = "Это новостной пост. Пиши строго по делу, без воды." if is_news else "Это качественный авторский tech-пост."
 
