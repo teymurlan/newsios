@@ -36,7 +36,7 @@ logging.basicConfig(
 
 genai.configure(api_key=GEMINI_API_KEY)
 # Используем актуальную и быструю модель
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-1.5-flash-8b')
 
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
