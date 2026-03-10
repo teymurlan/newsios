@@ -119,7 +119,7 @@ async def generate_with_gemini(prompt: str) -> str:
     try:
         # Используем client.aio для асинхронных запросов
         response = await client.aio.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-1.5-flash",
             contents=prompt
         )
 
