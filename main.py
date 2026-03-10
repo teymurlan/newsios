@@ -13,7 +13,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramAPIError
 
-import google.generativeai as genai
+from google import genai
 
 # ==========================================
 # 1. ИНИЦИАЛИЗАЦИЯ И ПРОВЕРКА ОКРУЖЕНИЯ
