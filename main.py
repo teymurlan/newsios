@@ -16,6 +16,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramAPIError
 from google import genai
+from google.genai import types
 
 # ==========================================
 # 1. ИНИЦИАЛИЗАЦИЯ И ПРОВЕРКА ОКРУЖЕНИЯ
@@ -87,27 +88,42 @@ def sanitize_html_for_telegram(text: str) -> str:
 
 async def generate_image_with_gemini(topic: str) -> bytes | None:
     """Генерация стильной картинки к посту через Gemini Image."""
-    # Промпт для картинки: просим современный, минималистичный стиль без текста
     prompt = (
-        f"A high-quality, modern, cinematic illustration for a tech blog about: {topic}. "
+        f"Modern cinematic illustration for a tech blog about: {topic}. "
         "Minimalistic, neon accents, gadgets, smartphones, digital art style, premium look. "
         "Absolutely NO text, NO words, NO letters on the image."
     )
     try:
-        response = await client.aio.models.generate_content(
-            model='gemini-2.5-flash-image',
-            contents=prompt,
+        # Попытка 1: Используем Imagen 3 (лучшее качество для картинок)
+        response = await client.aio.models.generate_images(
+            model='imagen-3.0-generate-001',
+            prompt=prompt,
+            config=types.GenerateImagesConfig(
+                number_of_images=1,
+                aspect_ratio="16:9",
+                output_mime_type="image/jpeg"
+            )
         )
-        for part in response.candidates[0].content.parts:
-            if part.inline_data:
-                data = part.inline_data.data
-                if isinstance(data, str):
-                    return base64.b64decode(data)
-                return data
-        return None
+        if response.generated_images:
+            return response.generated_images[0].image.image_bytes
     except Exception as e:
-        logging.error("Ошибка генерации картинки: %s", e)
-        return None
+        logging.warning("Imagen 3 не сработал (%s), пробуем запасную модель...", e)
+        try:
+            # Попытка 2: Запасная модель
+            response = await client.aio.models.generate_content(
+                model='gemini-2.5-flash-image',
+                contents=prompt,
+            )
+            for part in response.candidates[0].content.parts:
+                if part.inline_data:
+                    data = part.inline_data.data
+                    if isinstance(data, str):
+                        return base64.b64decode(data)
+                    return data
+        except Exception as e2:
+            logging.error("Ошибка генерации картинки (запасной вариант): %s", e2)
+            
+    return None
 
 async def generate_with_gemini(prompt: str) -> str:
     try:
@@ -140,12 +156,12 @@ async def generate_tech_content(topic: str, is_news: bool = False, is_idea: bool
         )
         return await generate_with_gemini(prompt)
 
-    # Уменьшаем лимит символов, чтобы текст гарантированно влез в подпись к картинке (лимит Telegram - 1024 символа)
-    length_req = "400-600 символов" if is_news else "700-900 символов"
+    # Делаем посты короче для удобного чтения
+    length_req = "300-450 символов" if is_news else "500-700 символов"
     news_req = (
-        "Это новостной пост. Не выдумывай факты. Если не уверен в точных данных, пиши нейтрально."
+        "Это новостной пост. Не выдумывай факты. Пиши строго по делу."
         if is_news else
-        "Это не срочная новость, а качественный авторский tech-пост."
+        "Это качественный авторский tech-пост."
     )
 
     prompt = f"""
@@ -156,32 +172,23 @@ async def generate_tech_content(topic: str, is_news: bool = False, is_idea: bool
 
 Требования:
 - язык: русский
-- стиль: современный tech media
+- стиль: современный tech media, лаконичный
 - тон: уверенный, умный, чистый, без воды
-- текст должен легко читаться с телефона
-- объем: {length_req}
+- текст должен легко и быстро читаться с телефона (делай абзацы короткими)
+- объем: {length_req} (ПИШИ КОРОТКО И ПО ДЕЛУ)
 - {news_req}
-- без кринжа
-- без мусорного кликбейта
-- без выдуманных цифр и дат
-- можно использовать 2-4 уместных эмодзи на весь текст
+- без кринжа и мусорного кликбейта
+- 2-3 уместных эмодзи на весь текст
 
 Структура:
 1. Короткий цепляющий заголовок в теге <b>
-2. Пустая строка
-3. 1-2 коротких абзаца с сутью
-4. Пустая строка
-5. Блок <b>Почему это важно:</b>
-6. Пустая строка
-7. Блок <b>Итог:</b>
-8. Пустая строка
-9. Короткий финальный вывод или вопрос
-10. В конце 2-4 хэштега
+2. 1-2 коротких абзаца с самой сутью (без долгих вступлений)
+3. Короткий вывод или вопрос к аудитории
+4. Хэштеги: 3-4 штуки. В основном на русском, 1-2 на английском (например: #технологии #смартфоны #Apple). Аккуратно в самом низу.
 
 Формат:
-- ТОЛЬКО HTML, совместимый с Telegram
-- Разрешены теги: <b>, <i>, <code>
-- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать Markdown (никаких **, __, #)
+- ТОЛЬКО HTML, совместимый с Telegram (<b>, <i>, <code>)
+- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать Markdown (никаких **, __, # для заголовков)
 """
     return await generate_with_gemini(prompt)
 
@@ -239,7 +246,7 @@ async def cmd_start(message: Message) -> None:
     welcome_text = (
         "👋 <b>Привет! Я AI-контент-менеджер для tech-канала.</b>\n\n"
         "Я умею:\n"
-        "• генерировать посты с крутыми картинками 🖼\n"
+        "• генерировать короткие посты с крутыми картинками 🖼\n"
         "• делать авто-новости\n"
         "• предлагать идеи контента\n"
         "• публиковать посты в канал\n\n"
@@ -313,7 +320,7 @@ async def handle_topic_buttons(message: Message) -> None:
 
     topic_prompt, is_news = topic_map.get(message.text, ("Технологии", False))
 
-    await message.answer("⏳ <i>Пишу текст и рисую стильную картинку... (около 10-15 сек)</i>")
+    await message.answer("⏳ <i>Пишу короткий текст и рисую картинку... (около 10-15 сек)</i>")
     
     # Запускаем генерацию текста и картинки ПАРАЛЛЕЛЬНО для скорости
     text_task = generate_tech_content(topic_prompt, is_news=is_news)
@@ -331,7 +338,7 @@ async def handle_topic_buttons(message: Message) -> None:
 
 @router.message(Command("post"))
 async def cmd_post(message: Message) -> None:
-    await message.answer("⏳ <i>Пишу текст и рисую стильную картинку...</i>")
+    await message.answer("⏳ <i>Пишу текст и рисую картинку...</i>")
     text_task = generate_tech_content("Интересный технологический пост", is_news=False)
     image_task = generate_image_with_gemini("Интересный технологический пост")
     
