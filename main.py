@@ -24,6 +24,9 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 AUTO_POST_INTERVAL_MINUTES = int(os.getenv("AUTO_POST_INTERVAL_MINUTES", 180))
+print("BOT_TOKEN:", bool(os.getenv("BOT_TOKEN")))
+print("GEMINI_API_KEY:", bool(os.getenv("GEMINI_API_KEY")))
+print("CHANNEL_ID:", bool(os.getenv("CHANNEL_ID")))
 
 if not all([BOT_TOKEN, GEMINI_API_KEY, CHANNEL_ID]):
     logging.critical("ОШИБКА: Не заданы обязательные переменные окружения (BOT_TOKEN, GEMINI_API_KEY, CHANNEL_ID).")
