@@ -7,7 +7,7 @@ import logging
 import random
 import base64
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, F, Router
@@ -40,78 +40,85 @@ if not all([BOT_TOKEN, GEMINI_API_KEY, CHANNEL_ID]):
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 # ==========================================
-# 2. GEMINI CLIENT
+# ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
 # ==========================================
 client = genai.Client(api_key=GEMINI_API_KEY)
-
-# ==========================================
-# 3. TELEGRAM BOT
-# ==========================================
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 router = Router()
 dp.include_router(router)
 
 user_last_post: dict[int, dict] = {}
+next_post_time: datetime = None  # Время следующего автопоста
 
 # ==========================================
-# 4. ТЕМАТИЧЕСКАЯ ГАЛЕРЕЯ КАРТИНОК
+# 2. ТЕМАТИЧЕСКАЯ ГАЛЕРЕЯ КАРТИНОК (РАСШИРЕННАЯ)
 # ==========================================
 IMAGE_GALLERIES = {
     "apple": [
         "https://images.unsplash.com/photo-1512054502232-10a0a035d672?q=80&w=800&auto=format&fit=crop",
         "https://images.unsplash.com/photo-1556656793-08538906a9f8?q=80&w=800&auto=format&fit=crop",
         "https://images.unsplash.com/photo-1611406208690-d592664d0be7?q=80&w=800&auto=format&fit=crop",
-        "https://images.unsplash.com/photo-1531222256558-1bfb2ce3ada8?q=80&w=800&auto=format&fit=crop"
+        "https://images.unsplash.com/photo-1531222256558-1bfb2ce3ada8?q=80&w=800&auto=format&fit=crop",
+        "https://images.unsplash.com/photo-1583394838336-acd977736f90?q=80&w=800&auto=format&fit=crop",
+        "https://images.unsplash.com/photo-1603791239531-1dda55e194a6?q=80&w=800&auto=format&fit=crop"
     ],
     "android": [
         "https://images.unsplash.com/photo-1607252656733-fd7407043173?q=80&w=800&auto=format&fit=crop",
         "https://images.unsplash.com/photo-1598327105666-5b89351aff97?q=80&w=800&auto=format&fit=crop",
         "https://images.unsplash.com/photo-1625047509168-a7026f36de04?q=80&w=800&auto=format&fit=crop",
-        "https://images.unsplash.com/photo-1585060544812-6b45742d762f?q=80&w=800&auto=format&fit=crop"
+        "https://images.unsplash.com/photo-1585060544812-6b45742d762f?q=80&w=800&auto=format&fit=crop",
+        "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?q=80&w=800&auto=format&fit=crop"
     ],
     "vs": [
         "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?q=80&w=800&auto=format&fit=crop",
-        "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?q=80&w=800&auto=format&fit=crop",
-        "https://images.unsplash.com/photo-1526406915894-7bcd65f60845?q=80&w=800&auto=format&fit=crop"
+        "https://images.unsplash.com/photo-1526406915894-7bcd65f60845?q=80&w=800&auto=format&fit=crop",
+        "https://images.unsplash.com/photo-1598327105666-5b89351aff97?q=80&w=800&auto=format&fit=crop"
     ],
     "apps": [
         "https://images.unsplash.com/photo-1611162617474-5b21e879e113?q=80&w=800&auto=format&fit=crop",
         "https://images.unsplash.com/photo-1551288049-bebda4e38f71?q=80&w=800&auto=format&fit=crop",
-        "https://images.unsplash.com/photo-1607252656733-fd7407043173?q=80&w=800&auto=format&fit=crop"
+        "https://images.unsplash.com/photo-1607252656733-fd7407043173?q=80&w=800&auto=format&fit=crop",
+        "https://images.unsplash.com/photo-1555774698-0b77e0d5fac6?q=80&w=800&auto=format&fit=crop"
     ],
     "tech": [
         "https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=800&auto=format&fit=crop",
         "https://images.unsplash.com/photo-1504610926078-a1611febcad3?q=80&w=800&auto=format&fit=crop",
         "https://images.unsplash.com/photo-1498049794561-7780e7231661?q=80&w=800&auto=format&fit=crop",
-        "https://images.unsplash.com/photo-1531297183-14a232b69226?q=80&w=800&auto=format&fit=crop"
+        "https://images.unsplash.com/photo-1531297183-14a232b69226?q=80&w=800&auto=format&fit=crop",
+        "https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=800&auto=format&fit=crop",
+        "https://images.unsplash.com/photo-1525547719571-a2d4ac8945e2?q=80&w=800&auto=format&fit=crop"
     ]
 }
 
 # ==========================================
-# 5. UI / КЛАВИАТУРА
+# 3. UI / КЛАВИАТУРА
 # ==========================================
 def get_main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="📰 Сгенерировать пост"), KeyboardButton(text="⚡ Авто-новость")],
-            [KeyboardButton(text="📱 Android"), KeyboardButton(text="🍏 iPhone")],
-            [KeyboardButton(text="⚔️ Android vs iPhone"), KeyboardButton(text="💡 Фишка дня")],
-            [KeyboardButton(text="📲 Полезные приложения"), KeyboardButton(text="🎯 Идея для поста")],
+            [KeyboardButton(text="📱 Android"), KeyboardButton(text="🍏 iPhone"), KeyboardButton(text="⚔️ Android vs iPhone")],
+            [KeyboardButton(text="💡 Фишка дня"), KeyboardButton(text="📲 Полезные приложения")],
+            [KeyboardButton(text="🎯 Идея для поста"), KeyboardButton(text="📊 Статус")],
             [KeyboardButton(text="❓ Помощь"), KeyboardButton(text="🚀 Опубликовать в канал")]
         ],
         resize_keyboard=True
     )
 
 # ==========================================
-# 6. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# 4. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ==========================================
 def sanitize_html_for_telegram(text: str) -> str:
     if not text:
         return ""
+    # Удаляем возможные вступительные фразы от ИИ
+    text = re.sub(r"^(Вот твой пост|Конечно|Держи пост|Вот готовый текст).*?\n", "", text, flags=re.IGNORECASE).strip()
+    
     text = re.sub(r"```(?:html)?\n?(.*?)\n?```", r"<code>\1</code>", text, flags=re.DOTALL)
     text = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", text)
     text = re.sub(r"^#+\s*", "", text, flags=re.MULTILINE)
+    
     allowed_tags = ["b", "strong", "i", "em", "code", "u", "s", "pre"]
     escaped = html.escape(text.strip())
     for tag in allowed_tags:
@@ -191,11 +198,13 @@ async def generate_tech_content(topic: str, is_news: bool = False, is_idea: bool
 Напиши пост на тему:
 {topic}
 
+ВАЖНО: НЕ ПИШИ никаких приветствий или вводных фраз. Начинай СРАЗУ с заголовка.
+
 Требования:
 - язык: русский
 - стиль: современный tech media, лаконичный
 - тон: уверенный, умный, чистый, без воды
-- текст должен легко и быстро читаться с телефона (делай абзацы короткими, по 1-2 предложения)
+- текст должен легко и быстро читаться с телефона (делай абзацы короткими)
 - объем: {length_req} (ПИШИ КОРОТКО И ПО ДЕЛУ)
 - {news_req}
 - без кринжа и мусорного кликбейта
@@ -205,7 +214,9 @@ async def generate_tech_content(topic: str, is_news: bool = False, is_idea: bool
 1. Короткий цепляющий заголовок в теге <b>
 2. 1-2 коротких абзаца с самой сутью (без долгих вступлений)
 3. Короткий вывод
-4. ФИШКА КАНАЛА: В самом конце текста, перед хэштегами, добавь блок "🤖 <b>Мнение ИИ:</b>". Напиши там 1 короткое, дерзкое, саркастичное или футуристичное предложение от лица искусственного интеллекта по теме поста. И с новой строки добавь "🔥 <b>Уровень хайпа:</b> [оцени от 1 до 10]/10".
+4. ФИШКА КАНАЛА: В самом конце текста добавь блок:
+🤖 <b>Мнение ИИ:</b> [1 короткое, дерзкое или саркастичное предложение от лица ИИ по теме поста]
+🔥 <b>Уровень хайпа:</b> [оценка от 1 до 10]/10
 5. Хэштеги: 3-4 штуки в самом конце. 2-3 на русском, 1 на английском (например: #технологии #смартфоны #Apple).
 
 Формат:
@@ -258,16 +269,15 @@ async def safe_send_post(target, text: str, photo_bytes: bytes | None, reply_mar
                 await target.answer("❌ Ошибка при отправке сообщения.")
 
 # ==========================================
-# 7. ХЭНДЛЕРЫ БОТА
+# 5. ХЭНДЛЕРЫ БОТА
 # ==========================================
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
     welcome_text = (
         "👋 <b>Привет! Я AI-контент-менеджер для tech-канала.</b>\n\n"
-        "Я умею:\n"
+        "Я готов к запуску! Я умею:\n"
         "• генерировать короткие посты с крутыми картинками 🖼\n"
         "• делать авто-новости с фирменной фишкой канала\n"
-        "• предлагать идеи контента\n"
         "• публиковать посты в канал\n\n"
         "Выбирай нужную кнопку ниже."
     )
@@ -282,12 +292,26 @@ async def cmd_help(message: Message) -> None:
         "2. Получи готовый пост с картинкой и мнением ИИ\n"
         "3. Нажми <b>🚀 Опубликовать в канал</b>\n\n"
         "Команды:\n"
+        "<code>/status</code> — проверить таймер автопостинга\n"
         "<code>/post</code> — обычный пост\n"
         "<code>/autonews</code> — авто-новость\n"
         "<code>/idea</code> — идеи для постов\n"
         "<code>/publish</code> — опубликовать последний пост"
     )
     await safe_send_post(message, help_text, None, get_main_keyboard())
+
+@router.message(Command("status"))
+@router.message(F.text == "📊 Статус")
+async def cmd_status(message: Message) -> None:
+    global next_post_time
+    if next_post_time:
+        # Форматируем время для удобного отображения
+        time_str = next_post_time.strftime("%H:%M:%S (по времени сервера)")
+        status_text = f"🟢 <b>Бот работает отлично!</b>\n\nИнтервал автопостинга: {AUTO_POST_INTERVAL_MINUTES} минут.\nСледующий автоматический пост выйдет в:\n🕒 <b>{time_str}</b>"
+    else:
+        status_text = f"🟢 <b>Бот работает!</b>\n\nИнтервал автопостинга: {AUTO_POST_INTERVAL_MINUTES} минут.\nТаймер автопостинга инициализируется..."
+    
+    await message.answer(status_text, reply_markup=get_main_keyboard())
 
 @router.message(F.text == "🎯 Идея для поста")
 @router.message(Command("idea"))
@@ -327,7 +351,6 @@ async def cmd_publish(message: Message) -> None:
     })
 )
 async def handle_topic_buttons(message: Message) -> None:
-    # Маппинг: Текст кнопки -> (Промпт, Это новость?, Категория картинки)
     topic_map = {
         "📰 Сгенерировать пост": ("Интересный пост о технологиях, гаджетах, приложениях или трендах", False, "tech"),
         "⚡ Авто-новость": ("Свежая новость из мира Android, iPhone, iOS, гаджетов или AI", True, "tech"),
@@ -380,10 +403,10 @@ async def cmd_autonews(message: Message) -> None:
     await safe_send_post(message, text, photo, get_main_keyboard())
 
 # ==========================================
-# 8. АВТОПОСТИНГ
+# 6. АВТОПОСТИНГ
 # ==========================================
 async def auto_post_worker() -> None:
-    # (Тема, Это новость?, Категория картинки)
+    global next_post_time
     topics = [
         ("Свежая новость из мира IT", True, "tech"),
         ("Интересная функция Android", False, "android"),
@@ -397,6 +420,11 @@ async def auto_post_worker() -> None:
 
     while True:
         try:
+            # Устанавливаем время следующего поста
+            next_post_time = datetime.now() + timedelta(minutes=AUTO_POST_INTERVAL_MINUTES)
+            logging.info(f"Следующий автопост запланирован на {next_post_time.strftime('%H:%M:%S')}")
+            
+            # Ждем нужное время
             await asyncio.sleep(AUTO_POST_INTERVAL_MINUTES * 60)
 
             topic, is_news, category = random.choice(topics)
@@ -412,13 +440,15 @@ async def auto_post_worker() -> None:
                 continue
 
             await safe_send_post(CHANNEL_ID, post_text, image_bytes, is_channel=True)
-            logging.info("Автопостинг: пост отправлен в канал %s", CHANNEL_ID)
+            logging.info("Автопостинг: пост успешно отправлен в канал %s", CHANNEL_ID)
 
         except Exception as e:
             logging.error("Автопостинг ошибка: %s", e)
+            # Если произошла ошибка, ждем 1 минуту и пробуем снова, чтобы цикл не сломался
+            await asyncio.sleep(60)
 
 # ==========================================
-# 9. ЗАПУСК
+# 7. ЗАПУСК
 # ==========================================
 async def main() -> None:
     logging.info("Запуск бота...")
